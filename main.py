@@ -1424,6 +1424,75 @@ def require_permission(db_name, perm):
         return False
     return True
 
+# --- Changer le mot de passe d'un utilisateur (self ou par admin) ---
+def change_user_password(target_username: str, new_password: str = None) -> bool:
+    """
+    Change le mot de passe de `target_username`.
+    - Si current_user == target_username : autorisé.
+    - Sinon, seul un admin (global '*' ou sur une base) peut changer.
+    - new_password: si fourni, utilisé directement ; sinon on demande en prompt.
+    Retourne True si succès, False sinon.
+    """
+    global current_user
+
+    if current_user is None:
+        print("Action refusée : aucun utilisateur connecté.")
+        return False
+
+    # autorisation : soit self, soit admin global
+    is_self = (current_user == target_username)
+    is_admin = False
+    try:
+        # check_permission peut lever si absent ; on capture
+        is_admin = check_permission(current_user, "*", "admin") or check_permission(current_user, current_db or "", "admin")
+    except Exception:
+        is_admin = False
+
+    if not (is_self or is_admin):
+        print("Permission refusée : vous n'êtes pas autorisé à changer le mot de passe de cet utilisateur.")
+        return False
+
+    # demander le mot de passe si non fourni
+    if new_password is None:
+        # demander deux fois pour confirmation
+        p1 = input("Nouveau mot de passe : ").strip()
+        p2 = input("Confirmer le nouveau mot de passe : ").strip()
+        if p1 != p2:
+            print("Les mots de passe ne correspondent pas. Abandon.")
+            return False
+        if p1 == "":
+            print("Mot de passe vide non autorisé. Abandon.")
+            return False
+        new_password = p1
+
+    # charger users, vérifier existence, mettre à jour hash, sauvegarder
+    users = load_users()
+    u = users.get(target_username)
+    if not u:
+        print(f"Utilisateur '{target_username}' introuvable.")
+        return False
+
+    u["password_hash"] = _hash_password(new_password)
+    users[target_username] = u
+    save_users(users)
+    print(f"Mot de passe mis à jour pour '{target_username}'.")
+    return True
+
+# CLI helper
+def cli_change_password():
+    """
+    Helper pour changer le mot de passe depuis la CLI.
+    - Si admin connecté, peut entrer le nom d'un autre utilisateur.
+    - Sinon, change le mot de passe du current_user.
+    """
+    global current_user
+    if current_user is None:
+        print("Aucun utilisateur connecté. Connectez-vous ou contactez un administrateur.")
+        return
+    target = input("Utilisateur à mettre à jour (laisser vide = vous) : ").strip()
+    if not target:
+        target = current_user
+    change_user_password(target)
 
 
 
@@ -1449,9 +1518,19 @@ def help():
     print(" user_list")
     print(" user_delete <name>")
     print(" user_grant <user> <db> <right1,right2,...>")
+    print("           - read           : lecture des données et métadonnées (SELECT, SEARCH, DESCRIBE, LIST TABLES)")
+    print("           - write          : écriture / modification des données (INSERT, ALTER ON TABLES, UPDATE)")
+    print("           - create_table   : création de nouvelles tables dans la base")
+    print("           - drop_table     : suppression de tables (DROP TABLE)")
+    print("           - alter_table    : modification du schéma (ALTER TABLE : add/drop/change/rename column)")
+    print("           - create_db      : création de bases (CREATE DATABASE)  <-- optionnel selon politique")
+    print("           - drop_db        : suppression de bases (DROP DATABASE)")
+    print("           - admin          : droit administratif global (ou par base) — autorise tout, ainsi que la gestion des grants")
+    print("           - manage_users   : (optionnel) création/suppression/modification d'utilisateurs (si tu veux séparer du 'admin') ")
     print(" user_revoke <user> <db> <right1,right2,...>")
     print(" login <user>")
     print(" logout")
+    print(" user_password [username]      -> change le mot de passe (soi-même ou, si admin, celui d’un autre)")
     print("======================")
 
 
@@ -1560,6 +1639,20 @@ def prompt():
                 print("Authentification échouée.")
         elif command == "logout":
             set_current_user(None)
+
+            # --- Changer le mot de passe d’un utilisateur ---
+        elif command == "user_password":
+            # Si un nom d’utilisateur est donné, on l’utilise
+            if len(args) >= 1:
+                target = args[0]
+            else:
+                target = current_user
+    
+            if target is None:
+                print("❌ Aucun utilisateur connecté — veuillez vous connecter d’abord.")
+                continue
+    
+            change_user_password(target)
         
         
         elif command == "help":
