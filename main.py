@@ -232,6 +232,12 @@ def delete_db(db_name):
         print(f"La base '{db_name}' n'existe pas.")
         return
 
+        # permission : suppression de la base
+    # on exige un admin/droit drop_db sur la base cible
+    if not require_permission(db_name, "drop_db"):
+        return
+
+
     confirm = input(f"Voulez-vous vraiment supprimer '{db_name}' ? (oui/non) : ").strip().lower()
     if confirm == "oui":
         shutil.rmtree(path)
@@ -251,6 +257,9 @@ def delete_db(db_name):
 # Création de table 
 def create_table(table_name):
     if not ensure_db_selected():
+        return
+
+    if not require_permission(current_db, "create_table"):
         return
 
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
@@ -328,6 +337,11 @@ def list_tables():
     if not ensure_db_selected():
         return
 
+        # permission : lecture/listage des tables
+    if not require_permission(current_db, "read"):
+        return
+
+
     db_path = os.path.join(DB_ROOT, current_db)
     files = os.listdir(db_path)
 
@@ -347,6 +361,11 @@ def list_tables():
 def delete_table(table_name):
     if not ensure_db_selected():
         return
+
+        # permission : suppression de table
+    if not require_permission(current_db, "drop_table"):
+        return
+
 
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
@@ -374,6 +393,11 @@ def delete_table(table_name):
 def describe_table(table_name):
     if not ensure_db_selected():
         return
+
+        # permission : lecture des métadonnées
+    if not require_permission(current_db, "read"):
+        return
+
 
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
@@ -448,6 +472,11 @@ def describe_table(table_name):
 def alter_table(table_name):
     if not ensure_db_selected():
         return
+
+        # permission : modifier le schéma de la table
+    if not require_permission(current_db, "alter_table"):
+        return
+
 
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
@@ -681,6 +710,11 @@ def insert_data(table_name):
     if not ensure_db_selected():
         return
 
+        # permission : écriture/insertion dans la table
+    if not require_permission(current_db, "write"):
+        return
+
+
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
 
@@ -836,6 +870,11 @@ def select_table(table_name, columns=None):
     if not ensure_db_selected():
         return
 
+        # permission : lecture des données
+    if not require_permission(current_db, "read"):
+        return
+
+
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
 
@@ -889,6 +928,11 @@ def select_table(table_name, columns=None):
 def search_table(table_name, columns=None, where_clause=None):
     if not ensure_db_selected():
         return
+
+        # permission : lecture des données (filter/search)
+    if not require_permission(current_db, "read"):
+        return
+
 
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
@@ -978,6 +1022,11 @@ def search_table(table_name, columns=None, where_clause=None):
 def alter_on_tables(table_name, where_clause):
     if not ensure_db_selected():
         return
+
+        # permission : modification des données (bulk update)
+    if not require_permission(current_db, "write"):
+        return
+
 
     schema_path = os.path.join(DB_ROOT, current_db, f"{table_name}_schema.json")
     data_path = os.path.join(DB_ROOT, current_db, f"{table_name}_data.json")
@@ -1333,6 +1382,30 @@ def cli_create_user():
 def cli_list_users():
     for u in list_users():
         print(" -", u)
+
+# ---------- Contrôle de permissions ----------
+def require_permission(db_name, perm):
+    """
+    Vérifie que current_user existe et a la permission `perm` sur db_name.
+    Affiche un message et retourne False si la permission est refusée.
+    """
+    # si tu veux permettre l'administration sans login, adapte ici
+    global current_user
+    if current_user is None:
+        print("Permission refusée : aucun utilisateur connecté.")
+        return False
+    # check_permission doit exister dans ton code (défini précédemment)
+    try:
+        ok = check_permission(current_user, db_name, perm)
+    except Exception:
+        # si check_permission absent ou erreur, refuser par sécurité
+        print("Permission refusée (erreur de vérification).")
+        return False
+    if not ok:
+        print(f"Permission refusée : l'utilisateur '{current_user}' n'a pas le droit '{perm}' sur la base '{db_name}'.")
+        return False
+    return True
+
 
 
 
