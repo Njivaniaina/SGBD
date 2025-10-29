@@ -1301,6 +1301,24 @@ def grant_rights(username: str, db_name: str, rights: List[str]) -> bool:
     Donne des droits à un utilisateur sur une base.
     rights : liste de chaînes (ex: ["read","write"])
     """
+    global current_user
+
+    # Vérifier qu'un utilisateur est connecté
+    if current_user is None:
+        print("Permission refusée : aucun utilisateur connecté.")
+        return False
+
+    # Seul un administrateur (scope db_name ou global '*') peut accorder des droits
+    # check_permission doit exister (définie ailleurs)
+    # autoriser si current_user a 'admin' sur db_name OU sur '*' (global admin)
+    try:
+        if not (check_permission(current_user, db_name, "admin") or check_permission(current_user, "*", "admin")):
+            print(f"Permission refusée : seul un administrateur peut accorder des droits sur '{db_name}'.")
+            return False
+    except Exception:
+        print("Permission refusée (erreur lors de la vérification des permissions).")
+        return False
+
     users = load_users()
     u = users.get(username)
     if not u:
