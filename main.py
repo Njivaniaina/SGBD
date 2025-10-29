@@ -3,6 +3,9 @@ import json
 import shutil
 from datetime import datetime, date
 import re
+import hashlib
+from typing import Optional, Dict, Any, List
+
 
 DB_ROOT = "databases"
 
@@ -10,6 +13,8 @@ os.makedirs(DB_ROOT, exist_ok=True)
 
 current_db = None
 
+USERS_PATH = os.path.join(DB_ROOT, "users.json")  # fichier utilisateur 
+current_user: Optional[str] = None  # utilisateur courant 
 
 ###   Fonction    ###
 
@@ -1137,6 +1142,199 @@ def alter_on_tables(table_name, where_clause):
         print("Erreur lors de la sauvegarde :", e)
 
 
+# ---------- Gestion des utilisateurs & droits (stockage : databases/users.json) ----------
+def write_json_atomic(path: str, obj):
+    """
+    Écriture atomique : écrire dans un fichier .tmp puis os.replace
+    """
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, indent=2, ensure_ascii=False)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+def load_users() -> Dict[str, Any]:
+    """Charge la table users depuis USERS_PATH (retourne {} si absent)."""
+    if not os.path.exists(USERS_PATH):
+        return {}
+    try:
+        with open(USERS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+def save_users(users: Dict[str, Any]):
+    """Sauvegarde atomique du dictionnaire users."""
+    os.makedirs(os.path.dirname(USERS_PATH), exist_ok=True)
+    write_json_atomic(USERS_PATH, users)
+
+def _hash_password(password: str) -> str:
+    """Hash simple SHA-256 (pour prototype). Utilise sel+KDF en prod."""
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+# -------- CRUD Utilisateurs --------
+def create_user(username: str, password: str, attrs: Optional[Dict[str, Any]] = None) -> bool:
+    """
+    Crée un utilisateur.
+    Retourne True si créé, False si utilisateur existe déjà.
+    """
+    users = load_users()
+    if username in users:
+        print(f"Utilisateur '{username}' existe déjà.")
+        return False
+    users[username] = {
+        "password_hash": _hash_password(password),
+        "attrs": attrs or {},
+        "rights": {}  # droit par base : { "ma_base": ["read","write"] }
+    }
+    save_users(users)
+    print(f"Utilisateur '{username}' créé.")
+    return True
+
+def get_user(username: str) -> Optional[Dict[str, Any]]:
+    """Retourne le dict utilisateur ou None si absent."""
+    users = load_users()
+    return users.get(username)
+
+def list_users() -> List[str]:
+    """Retourne la liste des noms d'utilisateurs."""
+    return sorted(load_users().keys())
+
+def update_user_attrs(username: str, attrs: Dict[str, Any]) -> bool:
+    """Remplace/merge les attrs de l'utilisateur (merge shallow)."""
+    users = load_users()
+    u = users.get(username)
+    if not u:
+        print(f"Utilisateur '{username}' introuvable.")
+        return False
+    u_attrs = u.get("attrs", {})
+    u_attrs.update(attrs)
+    u["attrs"] = u_attrs
+    users[username] = u
+    save_users(users)
+    print(f"Attributs mis à jour pour '{username}'.")
+    return True
+
+def update_user_password(username: str, new_password: str) -> bool:
+    """Met à jour le mot de passe (hash)."""
+    users = load_users()
+    u = users.get(username)
+    if not u:
+        print(f"Utilisateur '{username}' introuvable.")
+        return False
+    u["password_hash"] = _hash_password(new_password)
+    users[username] = u
+    save_users(users)
+    print(f"Mot de passe mis à jour pour '{username}'.")
+    return True
+
+def delete_user(username: str) -> bool:
+    """Supprime un utilisateur."""
+    users = load_users()
+    if username not in users:
+        print(f"Utilisateur '{username}' introuvable.")
+        return False
+    del users[username]
+    save_users(users)
+    print(f"Utilisateur '{username}' supprimé.")
+    global current_user
+    if current_user == username:
+        current_user = None
+    return True
+
+# -------- Gestion des droits (per db) --------
+def grant_rights(username: str, db_name: str, rights: List[str]) -> bool:
+    """
+    Donne des droits à un utilisateur sur une base.
+    rights : liste de chaînes (ex: ["read","write"])
+    """
+    users = load_users()
+    u = users.get(username)
+    if not u:
+        print(f"Utilisateur '{username}' introuvable.")
+        return False
+    rmap = u.setdefault("rights", {})
+    cur = set(rmap.get(db_name, []))
+    cur.update(rights)
+    rmap[db_name] = sorted(cur)
+    users[username] = u
+    save_users(users)
+    print(f"Droits {rights} accordés à '{username}' sur la base '{db_name}'.")
+    return True
+
+def revoke_rights(username: str, db_name: str, rights: List[str]) -> bool:
+    """Retire des droits (si présents)."""
+    users = load_users()
+    u = users.get(username)
+    if not u:
+        print(f"Utilisateur '{username}' introuvable.")
+        return False
+    rmap = u.setdefault("rights", {})
+    cur = set(rmap.get(db_name, []))
+    for r in rights:
+        cur.discard(r)
+    rmap[db_name] = sorted(cur)
+    users[username] = u
+    save_users(users)
+    print(f"Droits {rights} retirés à '{username}' sur la base '{db_name}'.")
+    return True
+
+def get_user_rights(username: str, db_name: Optional[str] = None) -> Dict[str, List[str]]:
+    """Retourne le mapping des droits d'un utilisateur ; si db_name fourni, retourne la liste pour cette base."""
+    u = get_user(username)
+    if not u:
+        return {}
+    rights = u.get("rights", {})
+    if db_name:
+        return {db_name: rights.get(db_name, [])}
+    return rights
+
+def check_permission(username: str, db_name: str, right: str) -> bool:
+    """
+    Vérifie si l'utilisateur a le droit demandé sur la base.
+    'admin' droit spécial qui autorise tout.
+    """
+    u = get_user(username)
+    if not u:
+        return False
+    rights = u.get("rights", {})
+    db_rights = set(rights.get(db_name, []))
+    if "admin" in db_rights:
+        return True
+    return right in db_rights
+
+# -------- Auth / session simple --------
+def authenticate_user(username: str, password: str) -> bool:
+    """Vérifie le mot de passe. Ne change pas la session."""
+    u = get_user(username)
+    if not u:
+        return False
+    return u.get("password_hash") == _hash_password(password)
+
+def set_current_user(username: Optional[str]):
+    """Définit l'utilisateur courant (session simple)."""
+    global current_user
+    current_user = username
+    if username:
+        print(f"Utilisateur courant : {username}")
+    else:
+        print("Aucun utilisateur connecté.")
+
+# -------- Utilitaires CLI (optionnels) --------
+def cli_create_user():
+    name = input("username = ").strip()
+    pwd = input("password = ").strip()
+    create_user(name, pwd)
+
+def cli_list_users():
+    for u in list_users():
+        print(" -", u)
+
+
 
 def help():
     print("=== Mini SGBD JSON (avec types) ===")
@@ -1156,6 +1354,13 @@ def help():
     print(" alter_table <nom> ")
     print(" search <col1,col2|*> from <table> [where <cond>]")
     print(" alter_on_tables <table> [where <cond>]")
+    print(" user_create")
+    print(" user_list")
+    print(" user_delete <name>")
+    print(" user_grant <user> <db> <right1,right2,...>")
+    print(" user_revoke <user> <db> <right1,right2,...>")
+    print(" login <user>")
+    print(" logout")
     print("======================")
 
 
@@ -1241,6 +1446,30 @@ def prompt():
                 where_txt = m.group("where") or ""
                 alter_on_tables(table, where_txt)
 
+        # Gestion d'utilisateur
+        elif command == "user_create":
+            cli_create_user()
+        elif command == "user_list":
+            cli_list_users()
+        elif command == "user_delete" and len(args)==1:
+            delete_user(args[0])
+        elif command == "user_grant" and len(args)==3:
+            user, db, rights_txt = args
+            rights = [r.strip() for r in rights_txt.split(",") if r.strip()]
+            grant_rights(user, db, rights)
+        elif command == "user_revoke" and len(args)==3:
+            user, db, rights_txt = args
+            rights = [r.strip() for r in rights_txt.split(",") if r.strip()]
+            revoke_rights(user, db, rights)
+        elif command == "login" and len(args)==1:
+            pwd = input("password = ")
+            if authenticate_user(args[0], pwd):
+                set_current_user(args[0])
+            else:
+                print("Authentification échouée.")
+        elif command == "logout":
+            set_current_user(None)
+        
         
         elif command == "help":
             help()
