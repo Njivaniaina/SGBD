@@ -1,0 +1,34 @@
+[
+    {
+        "name": "id",
+        "type": "int",
+        "not_null": true,
+        "unique": true,
+        "auto_increment": true,
+        "default": 1
+    },
+    {
+        "name": "nom",
+        "type": "str",
+        "not_null": true,
+        "unique": false,
+        "auto_increment": false,
+        "default": null
+    },
+    {
+        "name": "prénom",
+        "type": "str",
+        "not_null": true,
+        "unique": false,
+        "auto_increment": false,
+        "default": "RKT"
+    },
+    {
+        "name": "age",
+        "type": "int",
+        "not_null": true,
+        "unique": false,
+        "auto_increment": false,
+        "default": null
+    }
+]

@@ -1,0 +1,32 @@
+[
+    {
+        "id": 1,
+        "nom": "RAKOTO",
+        "prénom": "Zily",
+        "age": 25
+    },
+    {
+        "id": 2,
+        "nom": "Mini",
+        "prénom": "RKT",
+        "age": null
+    },
+    {
+        "id": 3,
+        "nom": "gaga",
+        "prénom": "mini",
+        "age": null
+    },
+    {
+        "id": 4,
+        "nom": "Mini",
+        "prénom": "RKT",
+        "age": null
+    },
+    {
+        "id": 5,
+        "nom": "Ri",
+        "prénom": "RKT",
+        "age": 10
+    }
+]
